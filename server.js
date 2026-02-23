@@ -2,7 +2,6 @@ import express from "express";
 import fetch from "node-fetch";
 
 const app = express();
-app.use(express.json());
 
 const GOOGLE_API_KEYS = process.env.GOOGLE_API_KEYS.split(",");
 const GROQ_API_KEYS = process.env.GROQ_API_KEYS.split(",");
@@ -11,16 +10,20 @@ function getNextKey(keys) {
   return keys[Math.floor(Math.random() * keys.length)];
 }
 
-function isAllowedOrigin(origin) {
-  return origin && origin.startsWith("chrome-extension://");
-}
-
 function corsHeaders(origin) {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   };
+}
+
+function verifyProxyKey(req, res, next) {
+  const apiKey = req.headers["x-api-key"];
+  if (!apiKey || apiKey !== process.env.PROXY_API_KEY) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
 }
 
 async function callGoogle(model, apiKey, prompt) {
@@ -56,11 +59,8 @@ async function callGroq(model, apiKey, prompt, systemPrompt) {
   });
 }
 
-app.options("*", (req, res) => {
-  const origin = req.headers.origin;
-  if (!isAllowedOrigin(origin)) return res.sendStatus(403);
-  res.set(corsHeaders(origin)).send();
-});
+app.use(express.json());
+app.use(verifyProxyKey);
 
 app.post("/", async (req, res) => {
   const origin = req.headers.origin;

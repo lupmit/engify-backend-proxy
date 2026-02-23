@@ -3,18 +3,22 @@ import fetch from "node-fetch";
 
 const app = express();
 
-const GOOGLE_API_KEYS = process.env.GOOGLE_API_KEYS.split(",");
-const GROQ_API_KEYS = process.env.GROQ_API_KEYS.split(",");
+const GOOGLE_API_KEYS = (process.env.GOOGLE_API_KEYS || "").split(",").filter(Boolean);
+const GROQ_API_KEYS = (process.env.GROQ_API_KEYS || "").split(",").filter(Boolean);
+
+if (!GOOGLE_API_KEYS.length) {
+  throw new Error("Missing GOOGLE_API_KEYS");
+}
 
 function getNextKey(keys) {
   return keys[Math.floor(Math.random() * keys.length)];
 }
 
-function corsHeaders(origin) {
+function corsHeaders(origin = "*") {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, x-api-key",
   };
 }
 
@@ -38,59 +42,57 @@ async function callGoogle(model, apiKey, prompt) {
     }),
   });
 
-  return response;
-}
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Google API error: ${err}`);
+  }
 
-async function callGroq(model, apiKey, prompt, systemPrompt) {
-  return fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.3,
-    }),
-  });
+  return response.json();
 }
 
 app.use(express.json());
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  res.set(corsHeaders(origin));
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 app.use(verifyProxyKey);
 
 app.post("/", async (req, res) => {
   try {
-    const { text, context, mode } = req.body;
+    const { text } = req.body;
 
-    // (giữ nguyên validation + prompt logic của bạn)
+    if (!text) {
+      return res.status(400).json({ error: "Missing text" });
+    }
 
-    // ví dụ gọi Google
     const apiKey = getNextKey(GOOGLE_API_KEYS);
-    const response = await callGoogle(
+    const data = await callGoogle(
       "gemini-2.5-flash-lite",
       apiKey,
       text
     );
 
-    const data = await response.json();
     const enhancedText =
       data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 
     if (!enhancedText) {
-      return res.status(400).json({ error: "No output" });
+      return res.status(400).json({ error: "No output from model" });
     }
 
-    res.set(corsHeaders(origin)).json({ success: true, enhancedText });
+    res.json({ success: true, enhancedText });
   } catch (e) {
+    console.error(e);
     res.status(500).json({ error: e.message });
   }
 });
 
-app.get("/health", (req, res) => {
+app.get("/health", (_, res) => {
   res.status(200).send("ok");
 });
 

@@ -63,11 +63,6 @@ app.use(express.json());
 app.use(verifyProxyKey);
 
 app.post("/", async (req, res) => {
-  const origin = req.headers.origin;
-  if (!isAllowedOrigin(origin)) {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-
   try {
     const { text, context, mode } = req.body;
 
